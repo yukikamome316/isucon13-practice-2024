@@ -104,3 +104,9 @@ CREATE TABLE `reactions` (
   `emoji_name` VARCHAR(255) NOT NULL,
   `created_at` BIGINT NOT NULL
 ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
+
+-- livecommentsテーブルのlivestream_idに対するインデックス
+CREATE INDEX livecomments_livestream_id ON livecomments(`livestream_id`);
+
+-- livecommentsテーブルのcreated_atに対するインデックス
+CREATE INDEX livecomments_created_at ON livecomments(`created_at`);
