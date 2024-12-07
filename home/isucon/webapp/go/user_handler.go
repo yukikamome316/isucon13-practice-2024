@@ -430,3 +430,83 @@ func fillUserResponse(ctx context.Context, tx *sqlx.Tx, userModel UserModel) (Us
 
 	return user, nil
 }
+
+func fillUserResponseBulk(ctx context.Context, tx *sqlx.Tx, userModels []UserModel) (map[int64]User, error) {
+    // 1. ユーザーIDの収集
+    userIDs := make([]int64, 0, len(userModels))
+    for _, userModel := range userModels {
+        userIDs = append(userIDs, userModel.ID)
+    }
+
+    // 2. テーマの一括取得とマッピング
+    var themeModels []ThemeModel
+    query, args, err := sqlx.In("SELECT * FROM themes WHERE user_id IN (?)", userIDs)
+    if err != nil {
+        return nil, fmt.Errorf("failed to build theme query: %w", err)
+    }
+    query = tx.Rebind(query)
+    if err := tx.SelectContext(ctx, &themeModels, query, args...); err != nil {
+        return nil, fmt.Errorf("failed to fetch themes: %w", err)
+    }
+    themeMap := make(map[int64]ThemeModel)
+    for _, themeModel := range themeModels {
+        themeMap[themeModel.UserID] = themeModel
+    }
+
+    // 3. アイコンの一括取得とマッピング
+    var iconRows []struct {
+        UserID int64  `db:"user_id"`
+        Image  []byte `db:"image"`
+    }
+	
+    query, args, err = sqlx.In("SELECT user_id, image FROM icons WHERE user_id IN (?)", userIDs)
+    if err != nil {
+        return nil, fmt.Errorf("failed to build icon query: %w", err)
+    }
+    query = tx.Rebind(query)
+    if err := tx.SelectContext(ctx, &iconRows, query, args...); err != nil {
+        return nil, fmt.Errorf("failed to fetch icons: %w", err)
+    }
+    iconMap := make(map[int64][]byte)
+    for _, row := range iconRows {
+        iconMap[row.UserID] = row.Image
+    }
+
+    // 4. Userの組み立て
+    users := make(map[int64]User)
+    for _, userModel := range userModels {
+        // テーマを取得
+        themeModel, ok := themeMap[userModel.ID]
+        if !ok {
+            return nil, fmt.Errorf("theme not found for user ID %d", userModel.ID)
+        }
+        theme := Theme{
+            ID:       themeModel.ID,
+            DarkMode: themeModel.DarkMode,
+        }
+
+        // アイコンを取得
+        image, ok := iconMap[userModel.ID]
+        if !ok {
+            // アイコンが存在しない場合はフォールバック画像を読み込む
+            image, err = os.ReadFile(fallbackImage)
+            if err != nil {
+                return nil, fmt.Errorf("failed to read fallback image: %w", err)
+            }
+        }
+        iconHash := sha256.Sum256(image)
+
+        // Userを組み立て
+        users[userModel.ID] = User{
+            ID:          userModel.ID,
+            Name:        userModel.Name,
+            DisplayName: userModel.DisplayName,
+            Description: userModel.Description,
+            Theme:       theme,
+            IconHash:    fmt.Sprintf("%x", iconHash),
+        }
+    }
+
+    return users, nil
+}
+
