@@ -14,7 +14,8 @@ CREATE TABLE `users` (
 CREATE TABLE `icons` (
   `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
   `user_id` BIGINT NOT NULL,
-  `image` LONGBLOB NOT NULL
+  `image` LONGBLOB NOT NULL,
+  INDEX `idx_icons_user_id` (`user_id`)
 ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- ユーザごとのカスタムテーマ
@@ -55,7 +56,8 @@ CREATE TABLE `tags` (
 CREATE TABLE `livestream_tags` (
   `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
   `livestream_id` BIGINT NOT NULL,
-  `tag_id` BIGINT NOT NULL
+  `tag_id` BIGINT NOT NULL,
+  INDEX `idx_livestream_tags_livestream_id` (`livestream_id`)
 ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- ライブ配信視聴履歴
@@ -91,9 +93,10 @@ CREATE TABLE `ng_words` (
   `user_id` BIGINT NOT NULL,
   `livestream_id` BIGINT NOT NULL,
   `word` VARCHAR(255) NOT NULL,
-  `created_at` BIGINT NOT NULL
+  `created_at` BIGINT NOT NULL,
+  INDEX `idx_user_id_livestream_id` (`user_id`, `livestream_id`)
 ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
-CREATE INDEX ng_words_word ON ng_words(`word`);
+
 
 -- ライブ配信に対するリアクション
 CREATE TABLE `reactions` (
