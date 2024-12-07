@@ -525,3 +525,116 @@ func fillLivestreamResponse(ctx context.Context, tx *sqlx.Tx, livestreamModel Li
 	}
 	return livestream, nil
 }
+
+func fillLivestreamResponseBulk(ctx context.Context, tx *sqlx.Tx, livestreamModels []LivestreamModel) (map[int64]Livestream, error) {
+	if len(livestreamModels) == 0 {
+		return nil, nil
+	}
+
+	// 1. UserIDとLivestreamIDを収集
+	userIDs := make([]int64, 0, len(livestreamModels))
+	livestreamIDs := make([]int64, 0, len(livestreamModels))
+	for _, livestream := range livestreamModels {
+		userIDs = append(userIDs, livestream.UserID)
+		livestreamIDs = append(livestreamIDs, livestream.ID)
+	}
+
+	// 2. ユーザー情報を一括取得
+	var ownerModels []UserModel
+	query, args, err := sqlx.In("SELECT * FROM users WHERE id IN (?)", userIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build owner query: %w", err)
+	}
+	query = tx.Rebind(query)
+	if err := tx.SelectContext(ctx, &ownerModels, query, args...); err != nil {
+		return nil, fmt.Errorf("failed to fetch owners: %w", err)
+	}
+
+	// OwnerIDをキーにしたマップを作成
+	ownerMap, err := fillUserResponseBulk(ctx, tx, ownerModels)
+	if err != nil {
+		return nil, fmt.Errorf("failed to process owner responses: %w", err)
+	}
+
+	// 3. LivestreamTag情報を一括取得
+	var livestreamTagModels []LivestreamTagModel
+	query, args, err = sqlx.In("SELECT * FROM livestream_tags WHERE livestream_id IN (?)", livestreamIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build livestream tag query: %w", err)
+	}
+	query = tx.Rebind(query)
+	if err := tx.SelectContext(ctx, &livestreamTagModels, query, args...); err != nil {
+		return nil, fmt.Errorf("failed to fetch livestream tags: %w", err)
+	}
+
+	// LivestreamIDをキーにマッピング
+	livestreamTagMap := make(map[int64][]LivestreamTagModel)
+	for _, livestreamTag := range livestreamTagModels {
+		livestreamTagMap[livestreamTag.LivestreamID] = append(livestreamTagMap[livestreamTag.LivestreamID], livestreamTag)
+	}
+
+	// 4. Tag情報を一括取得
+	tagIDs := make([]int64, 0, len(livestreamTagModels))
+	for _, tag := range livestreamTagModels {
+		tagIDs = append(tagIDs, tag.TagID)
+	}
+
+	var tagModels []TagModel
+	query, args, err = sqlx.In("SELECT * FROM tags WHERE id IN (?)", tagIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build tag query: %w", err)
+	}
+	query = tx.Rebind(query)
+	if err := tx.SelectContext(ctx, &tagModels, query, args...); err != nil {
+		return nil, fmt.Errorf("failed to fetch tags: %w", err)
+	}
+
+	// TagIDをキーにマッピング
+	tagMap := make(map[int64]Tag)
+	for _, tagModel := range tagModels {
+		tagMap[tagModel.ID] = Tag{
+			ID:   tagModel.ID,
+			Name: tagModel.Name,
+		}
+	}
+
+	// 5. Livestreamオブジェクトを構築
+	livestreamMap := make(map[int64]Livestream, len(livestreamModels))
+	for _, livestreamModel := range livestreamModels {
+		// Owner取得
+		owner, ok := ownerMap[livestreamModel.UserID]
+		if !ok {
+			return nil, fmt.Errorf("owner not found for UserID %d", livestreamModel.UserID)
+		}
+
+		// Tags取得
+		livestreamTags, ok := livestreamTagMap[livestreamModel.ID]
+		if !ok {
+			livestreamTags = []LivestreamTagModel{} // タグがない場合も初期化
+		}
+
+		tags := make([]Tag, 0, len(livestreamTags))
+		for _, livestreamTag := range livestreamTags {
+			tag, ok := tagMap[livestreamTag.TagID]
+			if !ok {
+				return nil, fmt.Errorf("tag not found for TagID %d", livestreamTag.TagID)
+			}
+			tags = append(tags, tag)
+		}
+
+		// Livestream作成
+		livestreamMap[livestreamModel.ID] = Livestream{
+			ID:           livestreamModel.ID,
+			Owner:        owner,
+			Title:        livestreamModel.Title,
+			Tags:         tags,
+			Description:  livestreamModel.Description,
+			PlaylistUrl:  livestreamModel.PlaylistUrl,
+			ThumbnailUrl: livestreamModel.ThumbnailUrl,
+			StartAt:      livestreamModel.StartAt,
+			EndAt:        livestreamModel.EndAt,
+		}
+	}
+
+	return livestreamMap, nil
+}
