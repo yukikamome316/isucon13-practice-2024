@@ -221,15 +221,29 @@ func searchLivestreamsHandler(c echo.Context) error {
 		}
 	}
 
-	livestreams := make([]Livestream, len(livestreamModels))
-	for i := range livestreamModels {
-		livestream, err := fillLivestreamResponse(ctx, tx, *livestreamModels[i])
-		if err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to fill livestream: "+err.Error())
-		}
-		livestreams[i] = livestream
+	// []*LivestreamModel から []LivestreamModel に変換
+	livestreamModelsValue := make([]LivestreamModel, len(livestreamModels))
+	for i, lm := range livestreamModels {
+		livestreamModelsValue[i] = *lm
 	}
 
+	// バルク関数で一括取得したLivestreamレスポンスを処理
+	livestreamMap, err := fillLivestreamResponseBulk(ctx, tx, livestreamModelsValue)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fill livestreams: "+err.Error())
+	}
+
+	// 取得したデータを返却用のスライスに変換
+	livestreams := make([]Livestream, 0, len(livestreamModels))
+	for _, livestreamModel := range livestreamModels {
+		livestream, ok := livestreamMap[livestreamModel.ID]
+		if !ok {
+			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("livestream not found for ID %d", livestreamModel.ID))
+		}
+		livestreams = append(livestreams, livestream)
+	}
+
+	// トランザクションをコミット
 	if err := tx.Commit(); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to commit: "+err.Error())
 	}
