@@ -127,7 +127,7 @@ func main() {
 	
 	e := echo.New()
 	e.Debug = false
-	e.Logger.SetLevel(echolog.DEBUG)
+	e.Logger.SetLevel(echolog.ERROR)
 	e.Use(middleware.Logger())
 	cookieStore := sessions.NewCookieStore(secret)
 	cookieStore.Options.Domain = "*.u.isucon.local"
