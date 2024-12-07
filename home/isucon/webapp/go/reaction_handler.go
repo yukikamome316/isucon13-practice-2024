@@ -66,15 +66,10 @@ func getReactionsHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "failed to get reactions")
 	}
 
-	reactions := make([]Reaction, len(reactionModels))
-	for i := range reactionModels {
-		reaction, err := fillReactionResponse(ctx, tx, reactionModels[i])
-		if err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to fill reaction: "+err.Error())
-		}
-
-		reactions[i] = reaction
-	}
+	reactions, err := fillReactionResponseBulk(ctx, tx, reactionModels)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fill reactions: "+err.Error())
+	}	
 
 	if err := tx.Commit(); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to commit: "+err.Error())
@@ -169,4 +164,85 @@ func fillReactionResponse(ctx context.Context, tx *sqlx.Tx, reactionModel Reacti
 	}
 
 	return reaction, nil
+}
+
+func fillReactionResponseBulk(ctx context.Context, tx *sqlx.Tx, reactionModels []ReactionModel) ([]Reaction, error) {
+	//一応何も無いとき対応
+	if len(reactionModels) == 0 {
+		return nil, nil
+	}
+
+	// 1. UserIDとLivestreamIDを収集
+    userIDs := make([]int64, 0, len(reactionModels))
+    livestreamIDs := make([]int64, 0, len(reactionModels))
+    for _, reaction := range reactionModels {
+        userIDs = append(userIDs, reaction.UserID)
+        livestreamIDs = append(livestreamIDs, reaction.LivestreamID)
+    }  
+
+	//user一括取得
+	var userModels []UserModel
+    query, args, err := sqlx.In("SELECT * FROM users WHERE id IN (?)", userIDs)
+    if err != nil {
+        return nil, err
+    }
+
+    query = tx.Rebind(query)
+    if err := tx.SelectContext(ctx, &userModels, query, args...); err != nil {
+        return nil, err
+    }
+
+    // Livestream一括取得
+    var livestreamModels []LivestreamModel
+    query, args, err = sqlx.In("SELECT * FROM livestreams WHERE id IN (?)", livestreamIDs)
+    if err != nil {
+        return nil, err
+    }
+    query = tx.Rebind(query)
+    if err := tx.SelectContext(ctx, &livestreamModels, query, args...); err != nil {
+        return nil, err
+    }
+
+	//IDをキーにマッピング
+    userMap := make(map[int64]UserModel)
+    for _, user := range userModels {
+        userMap[user.ID] = user
+    }
+
+    livestreamMap := make(map[int64]LivestreamModel)
+    for _, livestream := range livestreamModels {
+        livestreamMap[livestream.ID] = livestream
+    }
+
+    // Reactionの組み立て
+    reactions := make([]Reaction, 0, len(reactionModels))
+    for _, reactionModel := range reactionModels {
+        userModel, ok := userMap[reactionModel.UserID]
+        if !ok {
+            return nil, fmt.Errorf("user not found for ID %d", reactionModel.UserID)
+        }
+        user, err := fillUserResponse(ctx, tx, userModel)
+        if err != nil {
+            return nil, err
+        }
+
+        livestreamModel, ok := livestreamMap[reactionModel.LivestreamID]
+        if !ok {
+            return nil, fmt.Errorf("livestream not found for ID %d", reactionModel.LivestreamID)
+        }
+        livestream, err := fillLivestreamResponse(ctx, tx, livestreamModel)
+        if err != nil {
+            return nil, err
+        }
+
+        reactions = append(reactions, Reaction{
+            ID:         reactionModel.ID,
+            EmojiName:  reactionModel.EmojiName,
+            User:       user,
+            Livestream: livestream,
+            CreatedAt:  reactionModel.CreatedAt,
+        })
+    }
+
+	return reactions, nil
 }
